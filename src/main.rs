@@ -2,7 +2,7 @@ use std::env;
 use rusty_ytdl::Video;
 use rusty_ytdl::search::{Playlist, PlaylistSearchOptions};
 use rusty_ytdl;
-use url::{ParseError, Url};
+use url::Url;
 use std::error::Error;
 
 #[tokio::main]
