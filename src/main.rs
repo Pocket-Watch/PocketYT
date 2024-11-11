@@ -4,11 +4,12 @@ use rusty_ytdl::search::{Playlist, PlaylistSearchOptions};
 use rusty_ytdl;
 use url::Url;
 use std::error::Error;
+use rusty_ytdl::VideoSearchOptions::Video as OtherVideo;
 use serde::Serialize;
 use serde_json::json;
 
 #[derive(Debug,Serialize)]
-struct VideoInfo {
+struct VidInf {
     title: String,
     url: String,
 }
@@ -22,6 +23,7 @@ struct Sources {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
     let args: Vec<String> = env::args().collect();
+
     if args.len() < 3 {
         eprintln!("Usage: {} <YouTube URL> <command>", args[0]);
         eprintln!("Commands:");
@@ -29,6 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
         eprintln!("  --dump-videos        Print array of video titles and URLs for a playlist.");
         return Ok(());
     }
+
     let url_str = &args[1];
     let command = &args[2];
 
@@ -78,8 +81,17 @@ async fn dump_videos(url_str: &str) -> Result<(), Box<dyn Error>> {
     let url = Url::parse(url_str)?;
     let is_playlist = url.path().contains("playlist");
 
+    //If a single video provided for arguments --dump-videos return a video object with a title and an url
     if !is_playlist {
-        eprintln!("The provided URL is not a playlist.");
+        //eprintln!("The provided URL is not a playlist.");
+        let video = Video::new(url_str)?;
+        let detail = video.get_basic_info().await?;
+        let data = VidInf {
+            title: detail.video_details.title,
+            url: detail.video_details.video_url
+        };
+        let videos = vec![data];
+        println!("{}",serde_json::to_string(&videos)?);
         return Ok(());
     }
 
@@ -90,10 +102,10 @@ async fn dump_videos(url_str: &str) -> Result<(), Box<dyn Error>> {
     });
 
     let playlist = Playlist::get(url_str, playlist_options.as_ref()).await?;
-    let videos: Vec<VideoInfo> = playlist
+    let videos: Vec<VidInf> = playlist
         .videos
         .into_iter()
-        .map(|video| VideoInfo {
+        .map(|video| VidInf {
             title: video.title,
             url: build_youtube_url(&video.url),
         })
