@@ -4,41 +4,105 @@ use rusty_ytdl::search::{Playlist, PlaylistSearchOptions};
 use rusty_ytdl;
 use url::Url;
 use std::error::Error;
+use serde::Serialize;
+use serde_json::json;
+
+#[derive(Debug,Serialize)]
+struct VideoInfo {
+    title: String,
+    url: String,
+}
+
+#[derive (Debug,Serialize)]
+struct Sources {
+    audio_source: String,
+    video_source: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <YouTube URL>", args[0]);
+    if args.len() < 3 {
+        eprintln!("Usage: {} <YouTube URL> <command>", args[0]);
+        eprintln!("Commands:");
+        eprintln!("  --get-sources        Print audio and video source URLs for a single video.");
+        eprintln!("  --dump-videos        Print array of video titles and URLs for a playlist.");
         return Ok(());
     }
     let url_str = &args[1];
+    let command = &args[2];
+
     let url = Url::parse(url_str);
     if url.is_err() {
         eprintln!("Invalid URL provided.");
         return Ok(());
     }
-    let url = Url::parse(url_str);
-    let is_playlist = url.unwrap().path().contains("playlist");
-    let playlist_options: Option<PlaylistSearchOptions> = Some(PlaylistSearchOptions {
+
+    match command.as_str() {
+        "--get-sources" => get_sources(url_str).await?,
+        "--dump-videos" => dump_videos(url_str).await?,
+        _ => eprintln!("Invalid command."),
+    }
+
+    Ok(())
+}
+
+async fn get_sources(url_str: &str) -> Result<(), Box<dyn Error>> {
+    let video = Video::new(url_str)?;
+    let video_info = video.get_info().await?;
+
+    let audio_source = video_info
+        .formats
+        .iter()
+        .find(|f| f.mime_type.audio_codec.is_some())
+        .map(|f| f.url.clone())
+        .unwrap_or("No audio source found".to_string());
+
+    let video_source = video_info
+        .formats
+        .iter()
+        .find(|f| f.mime_type.video_codec.is_some())
+        .map(|f| f.url.clone())
+        .unwrap_or("No video source found".to_string());
+
+    let sources = Sources {
+        audio_source,
+        video_source,
+    };
+
+    println!("{}", serde_json::to_string(&sources)?);
+    Ok(())
+}
+
+async fn dump_videos(url_str: &str) -> Result<(), Box<dyn Error>> {
+    let url = Url::parse(url_str)?;
+    let is_playlist = url.path().contains("playlist");
+
+    if !is_playlist {
+        eprintln!("The provided URL is not a playlist.");
+        return Ok(());
+    }
+
+    let playlist_options = Some(PlaylistSearchOptions {
         limit: 10000,
         request_options: None,
         fetch_all: false,
     });
-    if is_playlist {
-        let playlist = Playlist::get(url_str, Option::from(playlist_options).as_ref()).await?;
-        for video in &playlist.videos {
-            let full_url = build_youtube_url(&video.url);
-            println!(r#"{{"title": "{}", "url": "{}"}}"#, video.title, full_url);
-        }
-    } else {
-        let video = Video::new(url_str).unwrap();
-        let video_info = video.get_info().await.unwrap();
-        let vid_title = video_info.video_details.title;
-        println!(r#"{{"title": "{}", "url": "{}"}}"#, vid_title, Url::parse(url_str).unwrap());
-    }
-    return Ok(());
+
+    let playlist = Playlist::get(url_str, playlist_options.as_ref()).await?;
+    let videos: Vec<VideoInfo> = playlist
+        .videos
+        .into_iter()
+        .map(|video| VideoInfo {
+            title: video.title,
+            url: build_youtube_url(&video.url),
+        })
+        .collect();
+
+    println!("{}", serde_json::to_string(&videos)?);
+    Ok(())
 }
+
 fn build_youtube_url(video_id: &str) -> String {
     let base_url = "https://www.youtube.com/watch?v=";
     format!("{}{}", base_url, video_id)
